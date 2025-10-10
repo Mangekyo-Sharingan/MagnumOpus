@@ -11,14 +11,22 @@ from tensorflow.keras.utils import to_categorical
 from sklearn.model_selection import train_test_split
 
 class DataLoader:
-    """Class responsible for loading and preprocessing diabetic retinopathy data"""
+    """
+    Class responsible for loading and preprocessing diabetic retinopathy data
+
+    This class implements a lazy loading strategy for handling multiple datasets:
+    - Metadata (file paths, labels) is loaded and merged in memory
+    - Actual image data remains on disk and is loaded on-demand during training
+    - This approach is memory efficient and scalable for large datasets
+    - No file duplication occurs - original images stay in their respective directories
+    """
 
     def __init__(self, config):
         self.config = config
         self.aptos_train_df = None
         self.aptos_test_df = None
         self.eyepacs_train_df = None
-        self.merged_train_df = None  # Combined dataset
+        self.merged_train_df = None  # Combined dataset (metadata only - uses lazy loading)
         self.pipeline_a = PipelineA()  # VGG16 & ResNet
         self.pipeline_b = PipelineB()  # InceptionV3
 

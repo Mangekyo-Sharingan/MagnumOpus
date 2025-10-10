@@ -3,13 +3,13 @@ Diabetic Retinopathy Classification Modules Package
 """
 
 __version__ = "1.0.0"
-__author__ = "Your Name"
+__author__ = "Adam Hagelin"
 
 from .config import Config
-from .data_loader import DataLoader
+from .data import DataLoader
 from .models import ModelFactory
-from .trainer import Trainer
-from .evaluator import Evaluator
+from .train import Trainer
+from .test import Evaluator
 from .utils import Utils
 
 __all__ = [
