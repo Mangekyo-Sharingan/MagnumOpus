@@ -23,7 +23,15 @@ class Config:
         self.eyepacs_dir = self.data_dir / "EyePacs"
         self.eyepacs_train_images_dir = self.eyepacs_dir / "train"
         self.eyepacs_test_images_dir = self.eyepacs_dir / "test"
-        self.eyepacs_train_csv = self.eyepacs_dir / "trainLabels.csv" / "trainLabels.csv"
+        self.eyepacs_train_csv = self.eyepacs_dir / "trainLabels.csv"
+
+        # Training parameters
+        self.batch_size = 32
+        self.validation_split = 0.2
+        self.random_state = 42
+        self.num_classes = 5  # 0-4 severity levels
+        self.epochs = 50
+        self.learning_rate = 0.001
 
         # Model-specific parameters
         self.model_configs = {
@@ -41,50 +49,50 @@ class Config:
             }
         }
 
-        # General model parameters
-        self.batch_size = 32
-        self.num_classes = 5  # 0-4 severity levels
-        self.epochs = 50
-        self.learning_rate = 0.001
-
         # Available models
         self.models = ['vgg16', 'resnet50', 'inceptionv3']
 
-        # Training parameters
-        self.validation_split = 0.2
-        self.random_state = 42
+    def print_config(self):
+        """Print configuration for debugging"""
+        print("=" * 50)
+        print("CONFIGURATION SETTINGS")
+        print("=" * 50)
+        print(f"Base directory: {self.base_dir}")
+        print(f"Data directory: {self.data_dir}")
+        print(f"APTOS train CSV: {self.aptos_train_csv}")
+        print(f"APTOS test CSV: {self.aptos_test_csv}")
+        print(f"EyePACS train CSV: {self.eyepacs_train_csv}")
+        print(f"Batch size: {self.batch_size}")
+        print(f"Validation split: {self.validation_split}")
+        print(f"Random state: {self.random_state}")
+        print(f"Available models: {self.models}")
+        print("=" * 50)
 
-        # Data augmentation parameters for training
-        self.augmentation_params = {
-            'rotation_range': 20,
-            'width_shift_range': 0.2,
-            'height_shift_range': 0.2,
-            'horizontal_flip': True,
-            'zoom_range': 0.2,
-            'fill_mode': 'constant',
-            'cval': 0  # Fill with black
-        }
+# Test function for independent execution
+def test_config():
+    """Test the configuration module independently"""
+    print("Testing Config module...")
 
-    def create_directories(self):
-        """Create necessary output directories"""
-        output_dirs = [
-            self.base_dir / "models",
-            self.base_dir / "results",
-            self.base_dir / "logs"
-        ]
-        for directory in output_dirs:
-            directory.mkdir(parents=True, exist_ok=True)
+    try:
+        config = Config()
+        print("✓ Config object created successfully")
 
-    def get_model_config(self, model_name):
-        """Get specific configuration for a model"""
-        if model_name.lower() not in self.model_configs:
-            raise ValueError(f"Unknown model: {model_name}")
-        return self.model_configs[model_name.lower()]
+        # Test path existence
+        print(f"✓ Base directory exists: {config.base_dir.exists()}")
+        print(f"✓ Data directory exists: {config.data_dir.exists()}")
+        print(f"✓ APTOS directory exists: {config.aptos_dir.exists()}")
+        print(f"✓ EyePACS directory exists: {config.eyepacs_dir.exists()}")
 
-    def get_image_size(self, model_name):
-        """Get image size for specific model"""
-        return self.get_model_config(model_name)['image_size']
+        # Print configuration
+        config.print_config()
 
-    def get_pipeline_type(self, model_name):
-        """Get pipeline type (A or B) for specific model"""
-        return self.get_model_config(model_name)['pipeline']
+        print("✓ Config module test PASSED")
+        return True
+
+    except Exception as e:
+        print(f"✗ Config module test FAILED: {e}")
+        return False
+
+if __name__ == "__main__":
+    success = test_config()
+    print(f"\nConfig Module Test Result: {'PASS' if success else 'FAIL'}")

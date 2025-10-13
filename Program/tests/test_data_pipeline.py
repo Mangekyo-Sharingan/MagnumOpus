@@ -8,6 +8,8 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from PIL import Image
+from datetime import datetime
+import io
 
 # Add the modules directory to the path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -22,12 +24,42 @@ class DataPipelineTestSuite:
         self.config = Config()
         self.passed_tests = 0
         self.total_tests = 0
+        self.output_buffer = io.StringIO()  # Capture output
+
+    def _print(self, message="", save_to_file=True):
+        """Print to console and optionally save to buffer"""
+        print(message)
+        if save_to_file:
+            self.output_buffer.write(message + "\n")
+
+    def save_output_to_file(self):
+        """Save the captured output to a text file"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = Path(__file__).parent / f"data_pipeline_test_results_{timestamp}.txt"
+
+        # Create header with test information
+        header = f"""
+Data Pipeline Test Results
+==========================
+Test Date: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+Test File: {Path(__file__).name}
+Python Version: {sys.version}
+Working Directory: {os.getcwd()}
+
+"""
+
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(header)
+            f.write(self.output_buffer.getvalue())
+
+        print(f"\n📄 Test results saved to: {output_file}")
+        return output_file
 
     def run_all_tests(self):
         """Run all data loading tests"""
-        print("="*60)
-        print("DIABETIC RETINOPATHY DATA PIPELINE TESTS")
-        print("="*60)
+        self._print("="*60)
+        self._print("DIABETIC RETINOPATHY DATA PIPELINE TESTS")
+        self._print("="*60)
 
         # Test configuration
         self.test_config_setup()
@@ -47,9 +79,12 @@ class DataPipelineTestSuite:
         # Summary
         self.print_test_summary()
 
+        # Save output to file
+        self.save_output_to_file()
+
     def test_config_setup(self):
         """Test that configuration is set up correctly"""
-        print("\n--- Testing Configuration Setup ---")
+        self._print("\n--- Testing Configuration Setup ---")
 
         # Test 1: Check if paths exist
         self._test("APTOS data directory exists",
@@ -79,7 +114,7 @@ class DataPipelineTestSuite:
 
     def test_data_loading_logic(self):
         """Test data loading functionality without importing DataLoader"""
-        print("\n--- Testing Data Loading Logic ---")
+        self._print("\n--- Testing Data Loading Logic ---")
 
         # Simulate what DataLoader._load_aptos_data() does
         if self.config.aptos_train_csv.exists():
@@ -131,13 +166,13 @@ class DataPipelineTestSuite:
             self._test("EyePACS column standardization works",
                       all(col in eyepacs_df_filtered.columns for col in required_cols))
 
-            print(f"    Original EyePACS samples: {len(eyepacs_df)}")
-            print(f"    Existing image files: {len(eyepacs_df_filtered)}")
-            print(f"    File existence rate: {len(eyepacs_df_filtered)/len(eyepacs_df)*100:.1f}%")
+            self._print(f"    Original EyePACS samples: {len(eyepacs_df)}")
+            self._print(f"    Existing image files: {len(eyepacs_df_filtered)}")
+            self._print(f"    File existence rate: {len(eyepacs_df_filtered)/len(eyepacs_df)*100:.1f}%")
 
     def test_dataset_merging_logic(self):
         """Test dataset merging functionality"""
-        print("\n--- Testing Dataset Merging Logic ---")
+        self._print("\n--- Testing Dataset Merging Logic ---")
 
         datasets_to_merge = []
 
@@ -191,7 +226,7 @@ class DataPipelineTestSuite:
 
     def test_pipeline_preprocessing(self):
         """Test preprocessing pipeline logic without TensorFlow"""
-        print("\n--- Testing Pipeline Preprocessing Logic ---")
+        self._print("\n--- Testing Pipeline Preprocessing Logic ---")
 
         # Test Pipeline A logic (224x224)
         self._test_pipeline_logic("Pipeline A", 224)
@@ -283,7 +318,7 @@ class DataPipelineTestSuite:
 
     def test_data_generator_readiness(self):
         """Test that data is ready for generator creation"""
-        print("\n--- Testing Data Generator Readiness ---")
+        self._print("\n--- Testing Data Generator Readiness ---")
 
         # Test model-pipeline mapping
         model_pipeline_mapping = {
@@ -309,52 +344,53 @@ class DataPipelineTestSuite:
 
     def _print_merged_dataset_statistics(self, merged_df):
         """Print statistics about the merged dataset"""
-        print(f"\n  Merged Dataset Statistics:")
-        print(f"    Total samples: {len(merged_df)}")
+        self._print(f"\n  Merged Dataset Statistics:")
+        self._print(f"    Total samples: {len(merged_df)}")
 
         # Dataset distribution
         dataset_counts = merged_df['dataset'].value_counts()
-        print(f"    Dataset distribution:")
+        self._print(f"    Dataset distribution:")
         for dataset, count in dataset_counts.items():
             percentage = (count / len(merged_df)) * 100
-            print(f"      {dataset}: {count} ({percentage:.1f}%)")
+            self._print(f"      {dataset}: {count} ({percentage:.1f}%)")
 
         # Diagnosis distribution
         diagnosis_counts = merged_df['diagnosis'].value_counts().sort_index()
-        print(f"    Overall diagnosis distribution:")
+        self._print(f"    Overall diagnosis distribution:")
         for diagnosis, count in diagnosis_counts.items():
             percentage = (count / len(merged_df)) * 100
-            print(f"      Level {diagnosis}: {count} ({percentage:.1f}%)")
+            self._print(f"      Level {diagnosis}: {count} ({percentage:.1f}%)")
 
     def _test(self, description, condition):
         """Helper method to run a test and track results"""
         self.total_tests += 1
         status = "PASS" if condition else "FAIL"
-        print(f"  [{status}] {description}")
+        message = f"  [{status}] {description}"
+        self._print(message)
 
         if condition:
             self.passed_tests += 1
 
     def print_test_summary(self):
         """Print summary of all tests"""
-        print("\n" + "="*60)
-        print("TEST SUMMARY")
-        print("="*60)
-        print(f"Total tests run: {self.total_tests}")
-        print(f"Tests passed: {self.passed_tests}")
-        print(f"Tests failed: {self.total_tests - self.passed_tests}")
+        self._print("\n" + "="*60)
+        self._print("TEST SUMMARY")
+        self._print("="*60)
+        self._print(f"Total tests run: {self.total_tests}")
+        self._print(f"Tests passed: {self.passed_tests}")
+        self._print(f"Tests failed: {self.total_tests - self.passed_tests}")
 
         if self.total_tests > 0:
             success_rate = (self.passed_tests/self.total_tests)*100
-            print(f"Success rate: {success_rate:.1f}%")
+            self._print(f"Success rate: {success_rate:.1f}%")
 
             if self.passed_tests == self.total_tests:
-                print("\n🎉 ALL TESTS PASSED! Data pipeline is ready for training.")
+                self._print("\n🎉 ALL TESTS PASSED! Data pipeline is ready for training.")
             else:
                 failed_count = self.total_tests - self.passed_tests
-                print(f"\n⚠️ {failed_count} test(s) failed. Please review the issues above.")
+                self._print(f"\n⚠️ {failed_count} test(s) failed. Please review the issues above.")
 
-        print("="*60)
+        self._print("="*60)
 
 def main():
     """Run the data pipeline tests"""
