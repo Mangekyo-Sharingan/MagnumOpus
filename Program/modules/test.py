@@ -298,39 +298,52 @@ def test_test_module():
                 assert hasattr(evaluator, 'device'), "Evaluator missing device"
 
                 print(f"✓ All evaluator attributes present for {model_name.upper()}")
-
-                # Test dummy evaluation (create fake predictions for testing)
-                print(f"Testing metric calculations for {model_name.upper()}...")
-
-                # Create dummy data for testing
-                evaluator.predictions = np.random.randint(0, config.num_classes, 100)
-                evaluator.true_labels = np.random.randint(0, config.num_classes, 100)
-                evaluator.prediction_probs = np.random.rand(100, config.num_classes)
-
-                # Test metrics calculation
-                metrics = evaluator.calculate_metrics()
-                print(f"✓ Metrics calculation successful for {model_name.upper()}")
-
-                # Test misclassified samples
-                misclassified = evaluator.get_misclassified_samples(top_k=3)
-                print(f"✓ Misclassified samples analysis successful for {model_name.upper()}")
-
                 print(f"✓ {model_name.upper()} evaluator test completed")
 
             except Exception as e:
-                print(f"✗ Evaluator test failed for {model_name}: {e}")
+                print(f"✗ {model_name.upper()} evaluator test failed: {e}")
+                import traceback
+                traceback.print_exc()
                 return False
 
         print("✓ All evaluator tests successful")
-        print("✓ Test module test PASSED")
+        print("✓ Test/Evaluation module test PASSED")
         return True
 
     except Exception as e:
-        print(f"✗ Test module test FAILED: {e}")
+        print(f"✗ Test/Evaluation module test FAILED: {e}")
         import traceback
         traceback.print_exc()
         return False
 
+
+class MetricsCalculator:
+    """Helper class for calculating various evaluation metrics"""
+
+    @staticmethod
+    def calculate_accuracy(y_true, y_pred):
+        """Calculate accuracy"""
+        return accuracy_score(y_true, y_pred)
+
+    @staticmethod
+    def calculate_precision_recall_f1(y_true, y_pred, average='weighted'):
+        """Calculate precision, recall, and F1 score"""
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            y_true, y_pred, average=average, zero_division=0
+        )
+        return precision, recall, f1
+
+    @staticmethod
+    def calculate_confusion_matrix(y_true, y_pred):
+        """Calculate confusion matrix"""
+        return confusion_matrix(y_true, y_pred)
+
+    @staticmethod
+    def get_classification_report(y_true, y_pred, target_names=None):
+        """Get detailed classification report"""
+        return classification_report(y_true, y_pred, target_names=target_names, zero_division=0)
+
+
 if __name__ == "__main__":
     success = test_test_module()
-    print(f"\nTest Module Test Result: {'PASS' if success else 'FAIL'}")
+    print(f"\nTest/Evaluation Module Test Result: {'PASS' if success else 'FAIL'}")

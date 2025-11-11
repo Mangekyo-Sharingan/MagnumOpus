@@ -52,7 +52,8 @@ class VGG16Model(BaseModel):
     def build_model(self):
         """Build VGG16 architecture with pre-trained weights"""
         # Load pre-trained VGG16
-        self.backbone = models.vgg16(pretrained=True)
+        from torchvision.models import VGG16_Weights
+        self.backbone = models.vgg16(weights=VGG16_Weights.IMAGENET1K_V1)
 
         # Freeze early layers (optional - can be made configurable)
         for param in self.backbone.features.parameters():
@@ -86,7 +87,8 @@ class ResNet50Model(BaseModel):
     def build_model(self):
         """Build ResNet50 architecture with pre-trained weights"""
         # Load pre-trained ResNet50
-        self.backbone = models.resnet50(pretrained=True)
+        from torchvision.models import ResNet50_Weights
+        self.backbone = models.resnet50(weights=ResNet50_Weights.IMAGENET1K_V1)
 
         # Freeze early layers (optional)
         for param in list(self.backbone.parameters())[:-2]:
@@ -116,7 +118,8 @@ class InceptionV3Model(BaseModel):
     def build_model(self):
         """Build InceptionV3 architecture with pre-trained weights"""
         # Load pre-trained InceptionV3
-        self.backbone = models.inception_v3(pretrained=True, aux_logits=True)
+        from torchvision.models import Inception_V3_Weights
+        self.backbone = models.inception_v3(weights=Inception_V3_Weights.IMAGENET1K_V1, aux_logits=True)
 
         # Freeze early layers (optional)
         for param in list(self.backbone.parameters())[:-4]:
@@ -156,6 +159,30 @@ def get_model(model_name, config):
         raise ValueError(f"Unknown model: {model_name}. Available models: {list(models_dict.keys())}")
 
     return models_dict[model_name.lower()](config)
+
+
+class ModelFactory:
+    """Factory class for creating model instances"""
+
+    @staticmethod
+    def create_model(model_name, config):
+        """
+        Create and return a model instance
+
+        Args:
+            model_name: Name of the model ('vgg16', 'resnet50', 'inceptionv3')
+            config: Configuration object
+
+        Returns:
+            Model instance
+        """
+        return get_model(model_name, config)
+
+    @staticmethod
+    def get_available_models():
+        """Get list of available model names"""
+        return ['vgg16', 'resnet50', 'inceptionv3']
+
 
 # Test function for independent execution
 def test_models_module():

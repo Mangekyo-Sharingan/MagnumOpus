@@ -2,6 +2,7 @@
 Data loading and preprocessing module for diabetic retinopathy classification
 """
 import pandas as pd
+import sys
 from pathlib import Path
 from PIL import Image
 import torch
@@ -10,6 +11,10 @@ from torchvision import transforms
 from sklearn.model_selection import train_test_split
 import logging
 from datetime import datetime
+
+# Add utils to path for Excel logger
+sys.path.insert(0, str(Path(__file__).parent.parent / "utils"))
+from excel_logger import ExcelLogger
 
 # Set up logging
 logging.basicConfig(
@@ -24,7 +29,7 @@ class DiabetitcRetinopathyDataset(Dataset):
     def __init__(self, dataframe, transform=None):
         self.dataframe = dataframe
         self.transform = transform
-        logger.info(f"Created DiabetitcRetinopathyDataset with {len(dataframe)} samples")
+        logger.info(f"Created Diabetitc Retinopathy Dataset with {len(dataframe)} samples")
 
     def __len__(self):
         return len(self.dataframe)
@@ -51,7 +56,6 @@ class DiabetitcRetinopathyDataset(Dataset):
 class CustomDataLoader:
     """
     Class responsible for loading and preprocessing diabetic retinopathy data
-
     This class implements a lazy loading strategy for handling multiple datasets:
     - Metadata (file paths, labels) is loaded and merged in memory
     - Actual image data remains on disk and is loaded on-demand during training
@@ -59,19 +63,32 @@ class CustomDataLoader:
     - No file duplication occurs - original images stay in their respective directories
     """
 
-    def __init__(self, config):
+    def __init__(self, config, use_excel_logger=True):
         logger.info("Initializing CustomDataLoader...")
         self.config = config
         self.aptos_train_df = None
         self.aptos_test_df = None
         self.eyepacs_train_df = None
+        self.eyepacs_test_df = None  # Fixed typo: was eypacs_test_df
         self.merged_train_df = None  # Combined dataset (metadata only - uses lazy loading)
         self.pipeline_a = PipelineA()  # VGG16 & ResNet
         self.pipeline_b = PipelineB()  # InceptionV3
+
+        # Excel logger
+        self.use_excel_logger = use_excel_logger
+        self.excel_logger = None
+
         logger.info("CustomDataLoader initialization complete")
 
     def load_data(self):
         """Load and merge training data from both APTOS and EyePACS datasets"""
+        # Start Excel logging
+        if self.use_excel_logger:
+            self.excel_logger = ExcelLogger("data_loading")
+            self.excel_logger.__enter__()
+            self.excel_logger.log("Starting data loading process")
+            self.excel_logger.log_separator()
+
         logger.info("=" * 50)
         logger.info("STARTING DATA LOADING PROCESS")
         logger.info("=" * 50)
@@ -79,28 +96,47 @@ class CustomDataLoader:
         start_time = datetime.now()
 
         try:
+            if self.use_excel_logger:
+                self.excel_logger.log("Loading APTOS dataset...")
             logger.info("Loading APTOS dataset...")
             self._load_aptos_data()
 
+            if self.use_excel_logger:
+                self.excel_logger.log("Loading EyePACS dataset...")
             logger.info("Loading EyePACS dataset...")
             self._load_eyepacs_data()
 
+            if self.use_excel_logger:
+                self.excel_logger.log("Merging datasets...")
             logger.info("Merging datasets...")
             self._merge_datasets()
 
             end_time = datetime.now()
             duration = end_time - start_time
+
             logger.info(f"Data loading completed successfully in {duration.total_seconds():.2f} seconds")
             logger.info(f"Total training samples after merging: {len(self.merged_train_df)}")
             logger.info("=" * 50)
 
+            if self.use_excel_logger:
+                self.excel_logger.log_separator()
+                self.excel_logger.log(f"Data loading completed in {duration.total_seconds():.2f} seconds")
+                self.excel_logger.log(f"Total training samples: {len(self.merged_train_df)}")
+                self.excel_logger.__exit__(None, None, None)
+
         except Exception as e:
             logger.error(f"Failed to load data: {e}")
+            if self.use_excel_logger and self.excel_logger:
+                self.excel_logger.log(f"ERROR: Data loading failed - {str(e)}")
+                self.excel_logger.__exit__(Exception, e, None)
             raise
 
     def _load_aptos_data(self):
         """Load APTOS dataset"""
         logger.info("Checking APTOS data availability...")
+
+        if self.use_excel_logger:
+            self.excel_logger.log("Checking APTOS data availability...")
 
         # Load training data
         if self.config.aptos_train_csv.exists():
@@ -124,16 +160,30 @@ class CustomDataLoader:
 
                 if missing_images > 0:
                     logger.warning(f"Found {missing_images} missing APTOS training images")
+                    if self.use_excel_logger:
+                        self.excel_logger.log(f"WARNING: {missing_images} APTOS training images missing")
                 else:
                     logger.info("All APTOS training images found successfully")
 
                 logger.info(f"Loaded {len(self.aptos_train_df)} APTOS training samples")
 
+                if self.use_excel_logger:
+                    self.excel_logger.log_dict({
+                        'dataset': 'APTOS Training',
+                        'samples': len(self.aptos_train_df),
+                        'missing_images': missing_images,
+                        'status': 'Success'
+                    }, prefix="APTOS Training Data:")
+
             except Exception as e:
                 logger.error(f"Failed to load APTOS training data: {e}")
+                if self.use_excel_logger:
+                    self.excel_logger.log(f"ERROR loading APTOS training data: {str(e)}")
                 raise
         else:
             logger.warning(f"APTOS training CSV not found: {self.config.aptos_train_csv}")
+            if self.use_excel_logger:
+                self.excel_logger.log(f"WARNING: APTOS training CSV not found")
 
         # Load test data
         if self.config.aptos_test_csv.exists():
@@ -156,20 +206,37 @@ class CustomDataLoader:
 
                 if missing_test_images > 0:
                     logger.warning(f"Found {missing_test_images} missing APTOS test images")
+                    if self.use_excel_logger:
+                        self.excel_logger.log(f"WARNING: {missing_test_images} APTOS test images missing")
                 else:
                     logger.info("All APTOS test images found successfully")
 
                 logger.info(f"Loaded {len(self.aptos_test_df)} APTOS test samples")
 
+                if self.use_excel_logger:
+                    self.excel_logger.log_dict({
+                        'dataset': 'APTOS Test',
+                        'samples': len(self.aptos_test_df),
+                        'missing_images': missing_test_images,
+                        'status': 'Success'
+                    }, prefix="APTOS Test Data:")
+
             except Exception as e:
                 logger.error(f"Failed to load APTOS test data: {e}")
+                if self.use_excel_logger:
+                    self.excel_logger.log(f"ERROR loading APTOS test data: {str(e)}")
                 raise
         else:
             logger.warning(f"APTOS test CSV not found: {self.config.aptos_test_csv}")
+            if self.use_excel_logger:
+                self.excel_logger.log(f"WARNING: APTOS test CSV not found")
 
     def _load_eyepacs_data(self):
         """Load EyePACS dataset"""
         logger.info("Checking EyePACS data availability...")
+
+        if self.use_excel_logger:
+            self.excel_logger.log("Checking EyePACS data availability...")
 
         if self.config.eyepacs_train_csv.exists():
             logger.info(f"Found EyePACS training CSV: {self.config.eyepacs_train_csv}")
@@ -207,20 +274,38 @@ class CustomDataLoader:
                     logger.warning(f"Found {missing_count} missing EyePACS images, filtering them out")
                     self.eyepacs_train_df = self.eyepacs_train_df.loc[existing_images]
                     logger.info(f"Filtered dataset down to {len(self.eyepacs_train_df)} samples with existing images")
+                    if self.use_excel_logger:
+                        self.excel_logger.log(f"WARNING: Filtered out {missing_count} missing images")
                 else:
                     logger.info("All EyePACS training images found successfully")
 
                 logger.info(f"Loaded {len(self.eyepacs_train_df)} EyePACS training samples")
 
+                if self.use_excel_logger:
+                    self.excel_logger.log_dict({
+                        'dataset': 'EyePACS Training',
+                        'samples': len(self.eyepacs_train_df),
+                        'missing_images': missing_count,
+                        'status': 'Success'
+                    }, prefix="EyePACS Training Data:")
+
             except Exception as e:
                 logger.error(f"Failed to load EyePACS training data: {e}")
+                if self.use_excel_logger:
+                    self.excel_logger.log(f"ERROR loading EyePACS training data: {str(e)}")
                 raise
         else:
             logger.warning(f"EyePACS training CSV not found: {self.config.eyepacs_train_csv}")
+            if self.use_excel_logger:
+                self.excel_logger.log(f"WARNING: EyePACS training CSV not found")
 
     def _merge_datasets(self):
         """Merge APTOS and EyePACS datasets"""
         logger.info("Starting dataset merging process...")
+
+        if self.use_excel_logger:
+            self.excel_logger.log_separator()
+            self.excel_logger.log("Merging datasets...")
 
         datasets_to_merge = []
 
@@ -251,6 +336,8 @@ class CustomDataLoader:
             logger.info("Dataset merging completed successfully")
         else:
             logger.error("No training data found to merge!")
+            if self.use_excel_logger:
+                self.excel_logger.log("ERROR: No training data found to merge!")
             raise ValueError("No training data found!")
 
     def _print_dataset_statistics(self):
@@ -266,16 +353,33 @@ class CustomDataLoader:
         # Dataset distribution
         logger.info("\nDataset distribution:")
         dataset_counts = self.merged_train_df['dataset'].value_counts()
+        dataset_stats = {}
         for dataset, count in dataset_counts.items():
             percentage = (count / total_samples) * 100
             logger.info(f"  {dataset}: {count} samples ({percentage:.1f}%)")
+            dataset_stats[dataset] = f"{count} ({percentage:.1f}%)"
 
         # Diagnosis distribution
         logger.info("\nDiagnosis distribution:")
         diagnosis_counts = self.merged_train_df['diagnosis'].value_counts().sort_index()
+        diagnosis_stats = {}
         for diagnosis, count in diagnosis_counts.items():
             percentage = (count / total_samples) * 100
             logger.info(f"  Level {diagnosis}: {count} samples ({percentage:.1f}%)")
+            diagnosis_stats[f"Level_{diagnosis}"] = f"{count} ({percentage:.1f}%)"
+
+        # Log to Excel
+        if self.use_excel_logger:
+            self.excel_logger.log_separator()
+            self.excel_logger.log("MERGED DATASET STATISTICS")
+            self.excel_logger.log_separator("-", 60)
+            self.excel_logger.log(f"Total samples: {total_samples}")
+            self.excel_logger.log_separator("-", 60)
+            self.excel_logger.log("Dataset Distribution:")
+            self.excel_logger.log_dict(dataset_stats)
+            self.excel_logger.log_separator("-", 60)
+            self.excel_logger.log("Diagnosis Distribution:")
+            self.excel_logger.log_dict(diagnosis_stats)
 
         # Diagnosis distribution by dataset
         logger.info("\nDiagnosis by dataset:")
@@ -647,8 +751,8 @@ def test_data_module():
         # Import config
         from config import Config
 
-        # Create config
-        config = Config()
+        # Create config (disable logger for cleaner test output)
+        config = Config(use_logger=False)
         print("✓ Config imported and created successfully")
 
         # Test pipeline classes
@@ -667,7 +771,7 @@ def test_data_module():
 
         # Test data loader creation
         print("Testing CustomDataLoader creation...")
-        data_loader = CustomDataLoader(config)
+        data_loader = CustomDataLoader(config, use_excel_logger=True)  # Enable Excel logger for data loading
         print("✓ CustomDataLoader created successfully")
 
         # Test data loading (this will check if files exist)
@@ -682,6 +786,12 @@ def test_data_module():
 
             if train_data is not None:
                 print(f"✓ Training data available: {len(train_data)} samples")
+                # Verify EyePACS data is included
+                if 'dataset' in train_data.columns:
+                    dataset_counts = train_data['dataset'].value_counts()
+                    print(f"✓ Dataset distribution:")
+                    for dataset, count in dataset_counts.items():
+                        print(f"  - {dataset}: {count} samples")
             else:
                 print("⚠ No training data available")
 

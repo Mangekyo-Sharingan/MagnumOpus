@@ -44,10 +44,16 @@ class DiabetitcRetinopathyClassifier:
             print(f"{model_name} - Trainable parameters: {param_info['trainable_parameters']:,}")
 
     def train_models(self):
-        """Train all models"""
+        """Train all models with pause between each model"""
         print("Training models...")
-        for model_name, model in self.models.items():
-            print(f"\nTraining {model_name}...")
+        total_models = len(self.config.models)
+
+        for idx, (model_name, model) in enumerate(self.models.items(), 1):
+            print(f"\n{'='*100}")
+            print(f"{'='*100}")
+            print(f"  TRAINING MODEL {idx}/{total_models}: {model_name.upper()}")
+            print(f"{'='*100}")
+            print(f"{'='*100}\n")
 
             # Create data loaders for this model
             train_loader, val_loader = self.data_loader.create_data_loaders(model_name)
@@ -59,18 +65,39 @@ class DiabetitcRetinopathyClassifier:
             # Train the model
             trainer.train_model(train_loader, val_loader)
 
-            # Save training history and plots
-            history_path = self.config.base_dir / "results" / f"{model_name}_training_history.npy"
-            trainer.save_training_history(history_path)
+            # Save complete model package (includes everything needed for future predictions)
+            models_dir = self.config.base_dir / "models"
+            model_package_dir = trainer.save_complete_model(models_dir, model_name)
 
-            plot_path = self.config.base_dir / "results" / f"{model_name}_training_plots.png"
-            trainer.plot_training_metrics(save_path=plot_path)
+            print(f"\n{'='*100}")
+            print(f"✅ {model_name.upper()} TRAINING AND SAVING COMPLETED!")
+            print(f"{'='*100}")
+            print(f"📦 Model package location: {model_package_dir}")
+            print(f"{'='*100}\n")
 
-            # Save trained model
-            model_path = self.config.base_dir / "models" / f"{model_name}_best_model.pth"
-            model.save_model(model_path)
+            # Pause and wait for user input before next model (unless it's the last model)
+            if idx < total_models:
+                print(f"\n{'─'*100}")
+                print(f"⏸️  PAUSED: {model_name.upper()} training complete.")
+                print(f"{'─'*100}")
+                print(f"📊 Models completed: {idx}/{total_models}")
+                print(f"📋 Remaining models: {', '.join(list(self.config.models)[idx:])}")
+                print(f"{'─'*100}")
 
-            print(f"{model_name} training completed!")
+                user_input = input(f"\n▶️  Press ENTER to continue training {list(self.config.models)[idx]} or type 'skip' to end training: ")
+
+                if user_input.lower().strip() == 'skip':
+                    print(f"\n⏹️  Training stopped by user. {total_models - idx} model(s) remaining.")
+                    break
+                else:
+                    print(f"\n▶️  Resuming training...\n")
+
+        print(f"\n{'='*100}")
+        print(f"🎉 ALL TRAINING SESSIONS COMPLETED!")
+        print(f"{'='*100}")
+        print(f"✓ Total models trained: {len(self.trainers)}/{total_models}")
+        print(f"✓ All model packages saved in: {self.config.base_dir / 'models'}")
+        print(f"{'='*100}\n")
 
     def evaluate_models(self):
         """Evaluate all trained models"""
