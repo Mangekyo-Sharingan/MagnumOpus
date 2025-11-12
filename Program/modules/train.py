@@ -129,7 +129,7 @@ class Trainer:
         print(f"   • Device          : {self.device}")
         if torch.cuda.is_available():
             print(f"   • GPU Name        : {torch.cuda.get_device_name(0)}")
-            print(f"   • GPU Memory      : {torch.cuda.get_device_properties(0).total_memory / 1024**6:.2f} GB")
+            print(f"   • GPU Memory      : {torch.cuda.get_device_properties(0).total_memory / 1024**3:.2f} GB")
         print(f"\n Training Configuration:")
         print(f"   • Total Epochs    : {num_epochs}")
         print(f"   • Batch Size      : {self.config.batch_size}")
