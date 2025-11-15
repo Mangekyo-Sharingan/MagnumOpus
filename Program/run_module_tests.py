@@ -28,13 +28,14 @@ class ModuleTester:
 
     def __init__(self):
         self.test_results = {}
+        # Updated to reflect new structure: test and utils are now in utils folder
         self.modules_to_test = [
-            'config',
-            'utils',
-            'data',
-            'models',
-            'train',
-            'test'
+            ('config', 'modules'),
+            ('data', 'modules'),
+            ('models', 'modules'),
+            ('train', 'modules'),
+            ('utils', 'utils'),
+            ('test', 'utils')
         ]
 
     def run_all_tests(self):
@@ -48,11 +49,11 @@ class ModuleTester:
 
         overall_success = True
 
-        for module_name in self.modules_to_test:
+        for module_name, folder in self.modules_to_test:
             print(f"\n{'='*20} TESTING {module_name.upper()} MODULE {'='*20}")
 
             try:
-                success = self._test_module(module_name)
+                success = self._test_module(module_name, folder)
                 self.test_results[module_name] = {
                     'status': 'PASS' if success else 'FAIL',
                     'success': success,
@@ -75,12 +76,16 @@ class ModuleTester:
         self._print_summary(overall_success)
         return overall_success
 
-    def _test_module(self, module_name):
+    def _test_module(self, module_name, folder):
         """Test an individual module"""
         try:
+            # Add the appropriate folder to the path
+            folder_path = Path(__file__).parent / folder
+            sys.path.insert(0, str(folder_path))
+            
             # Import the module
             module = importlib.import_module(module_name)
-            print(f"✓ Successfully imported {module_name} module")
+            print(f"✓ Successfully imported {module_name} module from {folder}/")
 
             # Find and run the test function
             test_function_name = f"test_{module_name}_module"

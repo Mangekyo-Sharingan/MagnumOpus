@@ -270,8 +270,11 @@ def test_test_module():
 
     try:
         # Import required modules
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).parent.parent / "modules"))
         from config import Config
-        from models import get_model
+        from models import ModelFactory
 
         # Create config
         config = Config()
@@ -285,7 +288,7 @@ def test_test_module():
                 print(f"Testing Evaluator with {model_name.upper()} model...")
 
                 # Create model
-                model = get_model(model_name, config)
+                model = ModelFactory.create_model(model_name, config)
                 print(f"✓ {model_name.upper()} model created")
 
                 # Create evaluator
