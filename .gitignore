@@ -1,0 +1,51 @@
+# Data folders
+Data/
+
+# IDE files
+.idea/
+*.iml
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs
+/Program/logs/
+
+# Models
+/models/**/*.pth
+/models/**/*.npy
+/models/**/*.png
+/models/**/*.json
+
+# Results
+/results/
+
+# /READMEs
+/READMEs/AUTO_REUSE_HYPERPARAMETERS.md
+/READMEs/GPU_OPTIMIZATION_IMPLEMENTATION.md
+/READMEs/HYPERPARAMETER_TUNING_PERFORMANCE_FIX.md
+/READMEs/MULTIPROCESSING_FIX.md
+/READMEs/MULTIPROCESSING_PICKLING_FIX.md
+/READMEs/PERFORMANCE_FIX_CRITICAL.md
+/models/OLD/inceptionv3_20251116_tuning/README.md
+/models/OLD/resnet50_20251114_tuning/README.md
+/READMEs/CLAHE_BOTTLENECK_FIX.md
+/Program/tests/run_module_tests.py
+/Program/tests/test_data_pipeline.py
+/Program/tests/test_dynamic_display.py
+/Program/tests/test_gpu_monitoring.py
+/Program/tests/test_miopen_fix.py
+/Program/tests/test_miopen_toggles.py
+/Program/tests/test_performance_fix.py
+/Program/tests/test_pickling_fix.py
+/Program/tests/test_resource_monitor.py
+/logs/
+/models/inceptionv3_PRELIMINARY_RESULTS/README.md
+/models/OLD/resnet50_20251119_final_1/README.md
+/models/OLD/vgg16_20251111_pre_tuning/README.md
+/models/OLD/vgg16_20251113_after_hypertuning/README.md
+/models/OLD/vgg16_20251119_final_1/README.md
+/models/resnet50_PRELIMINARY_RESULTS/README.md
+/models/vgg16_PRELIMINARY_RESULTS/README.md
