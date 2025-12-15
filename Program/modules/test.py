@@ -4,10 +4,12 @@ Testing and evaluation module for diabetic retinopathy classification models
 import numpy as np
 import torch
 import torch.nn.functional as F
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_recall_fscore_support
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_recall_fscore_support, roc_curve, auc
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
+from sklearn.preprocessing import label_binarize
+from itertools import cycle
 
 class Evaluator:
     """Class responsible for evaluating trained models"""
@@ -135,7 +137,68 @@ class Evaluator:
             'f1_weighted': f1_weighted
         }
 
+        # Plot ROC Curve
+        roc_path = self.config.base_dir / "results" / f"{self.model.model_name}_roc_curve.png"
+        self.plot_roc_curve(save_path=roc_path)
+
         return metrics
+
+    def plot_roc_curve(self, save_path=None):
+        """Plot ROC curve and calculate AUC for multi-class classification"""
+        if self.prediction_probs is None or self.true_labels is None:
+            raise ValueError("No prediction probabilities available. Run evaluate_model() first.")
+
+        n_classes = self.config.num_classes
+        
+        # Binarize the output
+        y_test = label_binarize(self.true_labels, classes=range(n_classes))
+        y_score = self.prediction_probs
+
+        # Compute ROC curve and ROC area for each class
+        fpr = dict()
+        tpr = dict()
+        roc_auc = dict()
+        
+        for i in range(n_classes):
+            fpr[i], tpr[i], _ = roc_curve(y_test[:, i], y_score[:, i])
+            roc_auc[i] = auc(fpr[i], tpr[i])
+
+        # Compute micro-average ROC curve and ROC area
+        fpr["micro"], tpr["micro"], _ = roc_curve(y_test.ravel(), y_score.ravel())
+        roc_auc["micro"] = auc(fpr["micro"], tpr["micro"])
+
+        # Plot ROC curves
+        plt.figure(figsize=(10, 8))
+        lw = 2
+        
+        plt.plot(fpr["micro"], tpr["micro"],
+                 label='micro-average ROC curve (area = {0:0.2f})'
+                       ''.format(roc_auc["micro"]),
+                 color='deeppink', linestyle=':', linewidth=4)
+
+        colors = cycle(['aqua', 'darkorange', 'cornflowerblue', 'green', 'red'])
+        class_names = self.config.class_names if hasattr(self.config, 'class_names') else {i: f'Class {i}' for i in range(n_classes)}
+        
+        for i, color in zip(range(n_classes), colors):
+            label_name = class_names.get(i, f'Class {i}')
+            plt.plot(fpr[i], tpr[i], color=color, lw=lw,
+                     label='ROC curve of {0} (area = {1:0.2f})'
+                     ''.format(label_name, roc_auc[i]))
+
+        plt.plot([0, 1], [0, 1], 'k--', lw=lw)
+        plt.xlim([0.0, 1.0])
+        plt.ylim([0.0, 1.05])
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title(f'Receiver Operating Characteristic (ROC) - {self.model.model_name.upper()}')
+        plt.legend(loc="lower right")
+        
+        if save_path:
+            plt.savefig(save_path)
+            print(f"ROC curve saved to {save_path}")
+        
+        # plt.show() # Don't show in non-interactive mode
+        plt.close()
 
     def plot_confusion_matrix(self, save_path=None, normalize=False):
         """Plot confusion matrix"""

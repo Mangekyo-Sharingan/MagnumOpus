@@ -53,8 +53,13 @@ class ModelLoader:
         model_path = model_files[0]
 
         # Load model architecture
-        from config import Config
-        from models import ModelFactory
+        try:
+            from .config import Config
+            from .models import ModelFactory
+        except ImportError:
+            from modules.config import Config
+            from modules.models import ModelFactory
+            
         config = Config()
 
         # Create model instance

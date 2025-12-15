@@ -13,6 +13,7 @@ from .test import Evaluator, MetricsCalculator
 from .utils import Utils, Visualizer, Logger, DeviceManager
 from .model_loader import ModelLoader, load_model_for_prediction, compare_models_prediction
 from .resource_monitor import ResourceMonitor
+from .hyperparameter_tuner import HyperparameterTuner
 
 __all__ = [
     'Config',
@@ -22,5 +23,6 @@ __all__ = [
     'Evaluator', 'MetricsCalculator',
     'Utils', 'Visualizer', 'Logger', 'DeviceManager',
     'ModelLoader', 'load_model_for_prediction', 'compare_models_prediction',
-    'ResourceMonitor'
+    'ResourceMonitor',
+    'HyperparameterTuner'
 ]

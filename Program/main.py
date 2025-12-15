@@ -8,7 +8,7 @@ os.environ['PYTORCH_MIOPEN_PREALLOC_MB'] = '14336'
 #Avoid repeated initialization in worker processes
 _TORCH_INITIALIZED = False
 
-from modules import Config, DataLoader, ModelFactory, Trainer, Evaluator, Utils, DeviceManager, ResourceMonitor
+from modules import Config, DataLoader, ModelFactory, Trainer, Evaluator, Utils, DeviceManager, ResourceMonitor, HyperparameterTuner, DiabetitcRetinopathyDataset, ModelLoader
 import torch
 
 def initialize_torch_settings():
@@ -48,6 +48,8 @@ class DiabetitcRetinopathyClassifier:
         self.evaluators = {}
         self.results = {}
         self.best_hyperparams = {}  # Store best params for each model
+        self.enable_tuning = False  # Flag for hyperparameter tuning
+        self.load_only = False      # Flag for loading pre-trained models
 
         # Set up device and reproducibility
         self.device = DeviceManager.get_device()
@@ -59,6 +61,39 @@ class DiabetitcRetinopathyClassifier:
             interval=1.0,  # 1 second base sampling
             adaptive=True  # Enable adaptive sampling
         )
+
+    def configure_execution(self):
+        """Configure execution mode (Standard vs Hyperparameter Tuning)"""
+        print("\n" + "=" * 100)
+        print(" " * 35 + "EXECUTION CONFIGURATION")
+        print("=" * 100)
+        print("Select execution mode:")
+        print("  1. Standard Training (Use default/config hyperparameters)")
+        print("  2. Hyperparameter Tuning (Run grid search before training)")
+        print("  3. Load Trained Models & Evaluate (Skip training)")
+        print("-" * 100)
+
+        while True:
+            choice = input("\n> Enter choice (1, 2, or 3): ").strip()
+            if choice == '1':
+                self.enable_tuning = False
+                self.load_only = False
+                print("\nSelected: Standard Training Mode")
+                break
+            elif choice == '2':
+                self.enable_tuning = True
+                self.load_only = False
+                print("\nSelected: Hyperparameter Tuning Mode")
+                print("Note: This will perform a grid search for each selected model before full training.")
+                break
+            elif choice == '3':
+                self.enable_tuning = False
+                self.load_only = True
+                print("\nSelected: Load Trained Models & Evaluate")
+                break
+            else:
+                print("Invalid choice. Please enter 1, 2, or 3.")
+        print("=" * 100 + "\n")
 
     def setup_project(self):
         #Initialize project setup
@@ -150,6 +185,86 @@ class DiabetitcRetinopathyClassifier:
         print(f"{len(selected_models)} model initialized successfully")
         print("=" * 100 + "\n")
 
+    def load_trained_models(self):
+        """Load pre-trained models from disk"""
+        print("\n" + "=" * 100)
+        print(" " * 35 + "LOAD TRAINED MODELS")
+        print("=" * 100)
+        
+        models_dir = self.config.base_dir / "models"
+        if not models_dir.exists():
+            print(f"Error: Models directory not found at {models_dir}")
+            return False
+
+        # Find available model packages (directories containing metadata)
+        available_models = []
+        for item in models_dir.iterdir():
+            if item.is_dir():
+                metadata_files = list(item.glob("*_metadata.json"))
+                if metadata_files:
+                    available_models.append(item)
+
+        if not available_models:
+            print("No trained models found.")
+            return False
+
+        print("\nAvailable model packages:")
+        print("-" * 100)
+        for idx, model_path in enumerate(available_models, 1):
+            print(f"  {idx}. {model_path.name}")
+        print("-" * 100)
+
+        print("\nSelection Options:")
+        print("  Enter numbers separated by commas (e.g., 1,3)")
+        print("  Enter 'all' to load all models")
+        
+        selected_paths = []
+        while True:
+            user_input = input("\n> Select models to load: ").strip().lower()
+            
+            if user_input == 'all':
+                selected_paths = available_models
+                break
+            elif user_input:
+                try:
+                    indices = [int(x.strip()) for x in user_input.split(',')]
+                    valid_selection = True
+                    temp_paths = []
+                    for idx in indices:
+                        if 1 <= idx <= len(available_models):
+                            temp_paths.append(available_models[idx - 1])
+                        else:
+                            print(f"Invalid selection: {idx}")
+                            valid_selection = False
+                            break
+                    
+                    if valid_selection:
+                        selected_paths = temp_paths
+                        break
+                except ValueError:
+                    print("Invalid input format.")
+            else:
+                print("Please make a selection.")
+
+        print(f"\nLoading {len(selected_paths)} models...")
+        
+        for model_path in selected_paths:
+            try:
+                print(f"Loading from {model_path.name}...")
+                loader = ModelLoader(model_path)
+                
+                # Extract model name from metadata or directory name
+                model_name = loader.metadata.get('model_name', model_path.name.split('_')[0])
+                
+                # Store in self.models
+                self.models[model_name] = loader.model
+                print(f"[OK] Loaded {model_name}")
+                
+            except Exception as e:
+                print(f"[FAIL] Failed to load {model_path.name}: {e}")
+
+        return len(self.models) > 0
+
     def train_models(self):
         #Train all models with pause between each model
         print("Training models")
@@ -162,11 +277,52 @@ class DiabetitcRetinopathyClassifier:
 
             # Get model hyperparameters from config
             model_config = self.config.get_model_config(model_name)
-            batch_size = model_config['batch_size']
-            learning_rate = model_config['learning_rate']
-            epochs = model_config['epochs']
+            
+            if self.enable_tuning:
+                print(f"\nStarting hyperparameter tuning for {model_name}...")
+                
+                # Create dataset for tuning
+                preprocessor = self.data_loader.get_preprocessor(model_name)
+                transform = preprocessor.get_train_transforms()
+                tuning_dataset = DiabetitcRetinopathyDataset(self.data_loader.merged_train_df, transform=transform)
 
-            print("Using model hyperparameters from config.py:")
+                # Initialize tuner
+                tuner = HyperparameterTuner(
+                    model_factory=lambda: ModelFactory.create_model(model_name, self.config),
+                    config=self.config,
+                    tuning_dataset=tuning_dataset
+                )
+                
+                # Run grid search
+                best_params = tuner.grid_search(n_samples=2000)
+                
+                if best_params:
+                    print(f"\nBest hyperparameters found for {model_name}:")
+                    print(f"  - Batch Size: {best_params['batch_size']}")
+                    print(f"  - Learning Rate: {best_params['learning_rate']}")
+                    print(f"  - Epochs: {best_params['epochs']}")
+                    
+                    # Update config with best params
+                    self.config.model_configs[model_name]['batch_size'] = best_params['batch_size']
+                    self.config.model_configs[model_name]['learning_rate'] = best_params['learning_rate']
+                    self.config.model_configs[model_name]['epochs'] = best_params['epochs']
+                    
+                    # Store best params
+                    self.best_hyperparams[model_name] = best_params
+                    
+                    # Re-initialize model for final training
+                    print(f"Re-initializing {model_name} for final training...")
+                    self.models[model_name] = ModelFactory.create_model(model_name, self.config)
+                    model = self.models[model_name]
+                else:
+                    print("Tuning failed or cancelled. Using default parameters.")
+
+            # Get (possibly updated) hyperparameters
+            batch_size = self.config.model_configs[model_name]['batch_size']
+            learning_rate = self.config.model_configs[model_name]['learning_rate']
+            epochs = self.config.model_configs[model_name]['epochs']
+
+            print("Using training hyperparameters:")
             print(f"  - Batch Size: {batch_size}")
             print(f"  - Learning Rate: {learning_rate}")
             print(f"  - Epochs: {epochs}")
@@ -289,18 +445,31 @@ class DiabetitcRetinopathyClassifier:
         try:
             # Setup
             self.setup_project()
+            # Configure execution mode
+            self.configure_execution()
             # Data preparation
             self.prepare_data()
-            # Model selection
-            selected_models = self.select_models()
-            # Model initialization
-            self.initialize_models(selected_models)
-            # Training
-            self.train_models()
-            # Evaluation
-            self.evaluate_models()
-            # Comparison
-            self.compare_results()
+            
+            if self.load_only:
+                # Load existing models
+                if self.load_trained_models():
+                    # Evaluation
+                    self.evaluate_models()
+                    # Comparison
+                    self.compare_results()
+                else:
+                    print("No models loaded. Exiting.")
+            else:
+                # Model selection
+                selected_models = self.select_models()
+                # Model initialization
+                self.initialize_models(selected_models)
+                # Training
+                self.train_models()
+                # Evaluation
+                self.evaluate_models()
+                # Comparison
+                self.compare_results()
 
             print("\n" + "=" * 70)
             print("Pipeline completed successfully!")
