@@ -4,7 +4,7 @@ Testing and evaluation module for diabetic retinopathy classification models
 import numpy as np
 import torch
 import torch.nn.functional as F
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_recall_fscore_support, roc_curve, auc
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_recall_fscore_support, roc_curve, auc, cohen_kappa_score
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
@@ -115,6 +115,10 @@ class Evaluator:
         print(f"Weighted Recall: {recall_weighted:.4f}")
         print(f"Weighted F1-Score: {f1_weighted:.4f}")
 
+        # Quadratic Cohen's Kappa (better for ordinal classification like DR grading)
+        quadratic_kappa = cohen_kappa_score(self.true_labels, self.predictions, weights='quadratic')
+        print(f"Quadratic Cohen's Kappa: {quadratic_kappa:.4f}")
+
         # Detailed classification report
         print("\nDetailed Classification Report:")
         class_names = [f'Class {i}' for i in range(self.config.num_classes)]
@@ -134,7 +138,8 @@ class Evaluator:
             'support': support,
             'precision_weighted': precision_weighted,
             'recall_weighted': recall_weighted,
-            'f1_weighted': f1_weighted
+            'f1_weighted': f1_weighted,
+            'quadratic_kappa': quadratic_kappa
         }
 
         # Plot ROC Curve
@@ -342,11 +347,16 @@ class Evaluator:
 
         # Save to file if path provided
         if save_path:
+            # Calculate Quadratic Kappa for the report
+            quadratic_kappa = cohen_kappa_score(self.true_labels, self.predictions, weights='quadratic')
+
             with open(save_path, 'w') as f:
                 f.write("CLASSIFICATION REPORT\n")
                 f.write("=" * 80 + "\n\n")
                 f.write(report)
-                f.write("\n" + "=" * 80 + "\n")
+                f.write("\n" + "-" * 80 + "\n")
+                f.write(f"Quadratic Cohen's Kappa: {quadratic_kappa:.4f}\n")
+                f.write("=" * 80 + "\n")
             print(f"[OK] Classification report saved to: {save_path}")
 
         return report

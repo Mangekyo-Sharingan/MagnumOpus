@@ -1,5 +1,6 @@
 #Main orchestration file for project
 import os
+import argparse
 
 #Set ROCm preallocation BEFORE importing torch
 os.environ.setdefault('PYTORCH_MIOPEN_PREALLOC_MB', '14336')  # Pre-allocate 14GB GPU memory
@@ -11,6 +12,43 @@ _TORCH_INITIALIZED = False
 from modules import Config, DataLoader, ModelFactory, Trainer, Evaluator, Utils, DeviceManager, ResourceMonitor, HyperparameterTuner, DiabetitcRetinopathyDataset, ModelLoader
 import torch
 
+
+def parse_args():
+    """Parse command line arguments for batch mode operation."""
+    parser = argparse.ArgumentParser(description="Diabetic Retinopathy Classification")
+    
+    # Execution mode
+    parser.add_argument("--mode", type=str, default="interactive",
+                        choices=["interactive", "train", "tune", "evaluate"],
+                        help="Execution mode (interactive requires user input)")
+    
+    # Model selection
+    parser.add_argument("--models", type=str, nargs="+",
+                        default=None,
+                        help="Models to train (e.g., --models resnet50 vgg16)")
+    
+    # Training parameters
+    parser.add_argument("--epochs", type=int, default=None,
+                        help="Number of training epochs")
+    parser.add_argument("--batch-size", type=int, default=None,
+                        help="Batch size for training")
+    parser.add_argument("--learning-rate", type=float, default=None,
+                        help="Learning rate")
+    
+    # Paths
+    parser.add_argument("--data-dir", type=str, default=None,
+                        help="Data directory path")
+    parser.add_argument("--output-dir", type=str, default=None,
+                        help="Output directory for models and results")
+    parser.add_argument("--checkpoint", type=str, default=None,
+                        help="Path to checkpoint for evaluation mode")
+    
+    # Distributed settings
+    parser.add_argument("--num-workers", type=int, default=None,
+                        help="Number of data loader workers")
+    
+    return parser.parse_args()
+
 def initialize_torch_settings():
     #Initialize PyTorch settings once at startup.
     global _TORCH_INITIALIZED
@@ -21,26 +59,33 @@ def initialize_torch_settings():
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = True
 
-    #Enable mixed precision matmul
+    #Enable mixed precision matmul (FP16)
     try:
         torch.set_float32_matmul_precision('medium')
-        print("Float32 matmul precision set to medium")
-    except Exception as e:
-        print(f"Could not set matmul precision: {e}")
+    except Exception:
+        pass  # Silently fail if not supported
 
     _TORCH_INITIALIZED = True
 
 class DiabetitcRetinopathyClassifier:
     #Main class that orchestrates the entire pipeline
 
-    def __init__(self):
+    def __init__(self, args=None):
         self.config = Config()
+        self.args = args
+        
+        # Determine batch mode from config or args
+        self.batch_mode = self.config.batch_mode
+        if args and args.mode != "interactive":
+            self.batch_mode = True
+
+        # Apply CLI overrides to config
+        self._apply_args_to_config()
 
         if self.config.enable_miopen_fix:
-            print("\n Applying MIOpen fixes before initializing the device")
+            if not self.batch_mode:
+                print("\n Applying MIOpen fixes before initializing the device")
             DeviceManager.apply_miopen_fixes(self.config)
-        else:
-            print("\n MIOpen fixes disabled via configuration")
 
         self.data_loader = None
         self.models = {}
@@ -55,15 +100,58 @@ class DiabetitcRetinopathyClassifier:
         self.device = DeviceManager.get_device()
         Utils.set_seed(self.config.random_state)
 
-        # Initialize resource monitor
-        self.resource_monitor = ResourceMonitor(
-            log_dir=self.config.base_dir / 'logs' / 'resources',
-            interval=1.0,  # 1 second base sampling
-            adaptive=True  # Enable adaptive sampling
-        )
+        # Initialize resource monitor (disabled in batch mode for reduced overhead)
+        if self.batch_mode:
+            self.resource_monitor = None
+        else:
+            self.resource_monitor = ResourceMonitor(
+                log_dir=self.config.base_dir / 'logs' / 'resources',
+                interval=1.0,
+                adaptive=True
+            )
+    
+    def _apply_args_to_config(self):
+        """Apply command line arguments to configuration."""
+        if not self.args:
+            return
+        
+        if self.args.data_dir:
+            from pathlib import Path
+            self.config.data_dir = Path(self.args.data_dir)
+            self.config.aptos_dir = self.config.data_dir / "Aptos"
+            self.config.eyepacs_dir = self.config.data_dir / "EyePacs"
+        
+        if self.args.num_workers is not None:
+            self.config.num_workers = self.args.num_workers
+        
+        if self.args.models:
+            self.config.models = self.args.models
+        
+        # Apply training parameters to all model configs
+        for model_name in self.config.model_configs:
+            if self.args.epochs is not None:
+                self.config.model_configs[model_name]['epochs'] = self.args.epochs
+            if self.args.batch_size is not None:
+                self.config.model_configs[model_name]['batch_size'] = self.args.batch_size
+            if self.args.learning_rate is not None:
+                self.config.model_configs[model_name]['learning_rate'] = self.args.learning_rate
 
     def configure_execution(self):
         """Configure execution mode (Standard vs Hyperparameter Tuning)"""
+        # In batch mode, determine from args or default to training
+        if self.batch_mode:
+            if self.args and self.args.mode == "tune":
+                self.enable_tuning = True
+                self.load_only = False
+            elif self.args and self.args.mode == "evaluate":
+                self.enable_tuning = False
+                self.load_only = True
+            else:  # train mode
+                self.enable_tuning = False
+                self.load_only = False
+            return
+        
+        # Interactive mode
         print("\n" + "=" * 100)
         print(" " * 35 + "EXECUTION CONFIGURATION")
         print("=" * 100)
@@ -97,18 +185,26 @@ class DiabetitcRetinopathyClassifier:
 
     def setup_project(self):
         #Initialize project setup
-        print("Setting up project")
+        if not self.batch_mode:
+            print("Setting up project")
         self.config.create_directories()
         self.data_loader = DataLoader(self.config)
 
     def prepare_data(self):
         #Load and prepare data for training
-        print("Loading and preparing data")
+        if not self.batch_mode:
+            print("Loading and preparing data")
         self.data_loader.load_data()
         # Additional data preparation steps
 
     def select_models(self):
         #Allow user to select which models to train
+        # In batch mode, use models from config/args
+        if self.batch_mode:
+            selected_models = self.args.models if (self.args and self.args.models) else self.config.models
+            return selected_models
+        
+        # Interactive mode
         print("\n" + "=" * 100)
         print(" " * 35 + "MODEL SELECTION")
         print("=" * 100)
@@ -165,25 +261,29 @@ class DiabetitcRetinopathyClassifier:
         if selected_models is None:
             selected_models = self.config.models
 
-        print("\n" + "=" * 100)
-        print(" " * 35 + "MODEL INITIALIZATION")
-        print("=" * 100)
-        print(f"\nInitializing {len(selected_models)} model(s)")
-        print("-" * 100)
+        if not self.batch_mode:
+            print("\n" + "=" * 100)
+            print(" " * 35 + "MODEL INITIALIZATION")
+            print("=" * 100)
+            print(f"\nInitializing {len(selected_models)} model(s)")
+            print("-" * 100)
 
         for idx, model_name in enumerate(selected_models, 1):
-            print(f"\n[{idx}/{len(selected_models)}] Creating {model_name.upper()} model")
+            if not self.batch_mode:
+                print(f"\n[{idx}/{len(selected_models)}] Creating {model_name.upper()} model")
             self.models[model_name] = ModelFactory.create_model(model_name, self.config)
 
-            # Print model information
-            param_info = Utils.count_parameters(self.models[model_name])
-            print(f"{model_name.upper()} initialized")
-            print(f"Total parameters: {param_info['total_parameters']:,}")
-            print(f"Trainable parameters: {param_info['trainable_parameters']:,}")
+            if not self.batch_mode:
+                # Print model information
+                param_info = Utils.count_parameters(self.models[model_name])
+                print(f"{model_name.upper()} initialized")
+                print(f"Total parameters: {param_info['total_parameters']:,}")
+                print(f"Trainable parameters: {param_info['trainable_parameters']:,}")
 
-        print("\n" + "-" * 100)
-        print(f"{len(selected_models)} model initialized successfully")
-        print("=" * 100 + "\n")
+        if not self.batch_mode:
+            print("\n" + "-" * 100)
+            print(f"{len(selected_models)} model initialized successfully")
+            print("=" * 100 + "\n")
 
     def load_trained_models(self):
         """Load pre-trained models from disk"""
@@ -294,7 +394,7 @@ class DiabetitcRetinopathyClassifier:
                 )
                 
                 # Run grid search
-                best_params = tuner.grid_search(n_samples=2000)
+                best_params = tuner.grid_search(n_samples=int(len(tuning_dataset) * 0.10))
                 
                 if best_params:
                     print(f"\nBest hyperparameters found for {model_name}:")
@@ -329,7 +429,7 @@ class DiabetitcRetinopathyClassifier:
 
             # Create data loaders for this model
             # Note: The batch size from the config is used here
-            train_loader, val_loader = self.data_loader.create_data_loaders(model_name, batch_size=batch_size)
+            train_loader, val_loader = self.data_loader.create_data_loaders(model_name, batch_size=batch_size, quiet=self.batch_mode)
 
             # Initialize trainer with resource monitor
             trainer = Trainer(model, self.config, model_name=model_name, resource_monitor=self.resource_monitor)
@@ -342,31 +442,37 @@ class DiabetitcRetinopathyClassifier:
             models_dir = self.config.base_dir / "models"
             model_package_dir = trainer.save_complete_model(models_dir, model_name)
 
-            print(f"\n{'='*100}")
-            print(f"{model_name.upper()} TRAINING AND SAVING COMPLETED!")
-            print(f"Model package location: {model_package_dir}")
-            print(f"{'='*100}\n")
+            if not self.batch_mode:
+                print(f"\n{'='*100}")
+                print(f"{model_name.upper()} TRAINING AND SAVING COMPLETED!")
+                print(f"Model package location: {model_package_dir}")
+                print(f"{'='*100}\n")
 
-            if idx < total_models:
+            # Remove interactive pause - continue directly in batch mode
+            if idx < total_models and not self.batch_mode:
                 input(f"\n>Press ENTER to continue training the next model")
 
-        print(f"\n{'='*100}")
-        print(f"ALL TRAINING SESSIONS COMPLETED!")
-        print(f"{'='*100}")
-        print(f"Total models trained: {len(self.trainers)}/{total_models}")
-        print(f"All model packages saved in: {self.config.base_dir / 'models'}")
-        print(f"{'='*100}\n")
+        if not self.batch_mode:
+            print(f"\n{'='*100}")
+            print(f"ALL TRAINING SESSIONS COMPLETED!")
+            print(f"{'='*100}")
+            print(f"Total models trained: {len(self.trainers)}/{total_models}")
+            print(f"All model packages saved in: {self.config.base_dir / 'models'}")
+            print(f"{'='*100}\n")
 
     def evaluate_models(self):
         #Evaluate all trained models on the test set.
-        print("Evaluating models on the test set...")
+        if not self.batch_mode:
+            print("Evaluating models on the test set...")
         for model_name, model in self.models.items():
-            print(f"\nEvaluating {model_name}")
+            if not self.batch_mode:
+                print(f"\nEvaluating {model_name}")
 
             # Get the test loader created during the data split
             test_loader = self.data_loader.get_test_loader()
             if not test_loader:
-                print(f"Skipping evaluation for {model_name}, no test loader found.")
+                if not self.batch_mode:
+                    print(f"Skipping evaluation for {model_name}, no test loader found.")
                 continue
 
             # Initialize evaluator
@@ -380,49 +486,59 @@ class DiabetitcRetinopathyClassifier:
             metrics = evaluator.calculate_metrics()
             self.results[model_name] = metrics
 
-            print(f"{model_name} Results:")
-            print(f"  Accuracy: {metrics['accuracy']:.4f}")
-            print(f"  Weighted F1: {metrics['f1_weighted']:.4f}")
-            print(f"  Weighted Precision: {metrics['precision_weighted']:.4f}")
-            print(f"  Weighted Recall: {metrics['recall_weighted']:.4f}")
+            if not self.batch_mode:
+                print(f"{model_name} Results:")
+                print(f"  Accuracy: {metrics['accuracy']:.4f}")
+                print(f"  Weighted F1: {metrics['f1_weighted']:.4f}")
+                print(f"  Weighted Precision: {metrics['precision_weighted']:.4f}")
+                print(f"  Weighted Recall: {metrics['recall_weighted']:.4f}")
+                print(f"  Quadratic Kappa: {metrics['quadratic_kappa']:.4f}")
 
             # Generate classification report
             report_path = self.config.base_dir / "results" / f"{model_name}_classification_report.txt"
             evaluator.generate_classification_report(save_path=report_path)
 
-            # Plot confusion matrix
-            cm_path = self.config.base_dir / "results" / f"{model_name}_confusion_matrix.png"
-            evaluator.plot_confusion_matrix(save_path=cm_path)
+            # Plot confusion matrix (skip in batch mode for speed)
+            if not self.batch_mode:
+                cm_path = self.config.base_dir / "results" / f"{model_name}_confusion_matrix.png"
+                evaluator.plot_confusion_matrix(save_path=cm_path)
 
             # Save evaluation results
             results_path = self.config.base_dir / "results" / f"{model_name}_evaluation_results.npy"
             evaluator.save_results(results_path)
-            print(f"{model_name} evaluation completed!")
+            if not self.batch_mode:
+                print(f"{model_name} evaluation completed!")
 
     def compare_results(self):
         #Compare results from all models
-        print("\nComparing model results")
-        print("=" * 60)
+        if not self.batch_mode:
+            print("\nComparing model results")
+            print("=" * 80)
 
-        # Display comparison table
-        print(f"{'Model':<15} {'Accuracy':<10} {'F1-Score':<10} {'Precision':<12} {'Recall':<10}")
-        print("-" * 60)
+            # Display comparison table
+            print(f"{'Model':<15} {'Accuracy':<10} {'F1-Score':<10} {'Precision':<12} {'Recall':<10} {'Quad Kappa':<10}")
+            print("-" * 80)
 
-        for model_name, metrics in self.results.items():
-            print(f"{model_name:<15} {metrics['accuracy']:<10.4f} {metrics['f1_weighted']:<10.4f} "
-                  f"{metrics['precision_weighted']:<12.4f} {metrics['recall_weighted']:<10.4f}")
+            for model_name, metrics in self.results.items():
+                print(f"{model_name:<15} {metrics['accuracy']:<10.4f} {metrics['f1_weighted']:<10.4f} "
+                      f"{metrics['precision_weighted']:<12.4f} {metrics['recall_weighted']:<10.4f} {metrics['quadratic_kappa']:<10.4f}")
 
         # Find best model
-        best_model = max(self.results.keys(), key=lambda x: self.results[x]['accuracy'])
-        best_accuracy = self.results[best_model]['accuracy']
-        print(f"\nBest performing model: {best_model} (Accuracy: {best_accuracy:.4f})")
+        if self.results:
+            best_model = max(self.results.keys(), key=lambda x: self.results[x]['accuracy'])
+            best_accuracy = self.results[best_model]['accuracy']
+            if not self.batch_mode:
+                print(f"\nBest performing model: {best_model} (Accuracy: {best_accuracy:.4f})")
+        else:
+            best_model = None
+            best_accuracy = 0.0
 
-        # Create comparison visualization
-        from modules.utils import Visualizer
-        visualizer = Visualizer()
-
-        comparison_path = self.config.base_dir / "results" / "model_comparison.png"
-        visualizer.plot_model_comparison(self.results, metric='accuracy', save_path=comparison_path)
+        # Create comparison visualization (skip in batch mode)
+        if not self.batch_mode:
+            from modules.utils import Visualizer
+            visualizer = Visualizer()
+            comparison_path = self.config.base_dir / "results" / "model_comparison.png"
+            visualizer.plot_model_comparison(self.results, metric='accuracy', save_path=comparison_path)
 
         # Save comparison results
         comparison_data = {
@@ -437,11 +553,13 @@ class DiabetitcRetinopathyClassifier:
     def run_full_pipeline(self):
         #Run the complete pipeline
         print("\n" + "=" * 100)
-        print(" " * 25 + "DIABETIC RETINOPATHY CLASSIFICATION PIPELINE")
-        print("=" * 100)
+        if not self.batch_mode:
+            print(" " * 25 + "DIABETIC RETINOPATHY CLASSIFICATION PIPELINE")
+            print("=" * 100)
 
-        # Start resource monitor
-        self.resource_monitor.start()
+        # Start resource monitor (if available)
+        if self.resource_monitor:
+            self.resource_monitor.start()
         try:
             # Setup
             self.setup_project()
@@ -458,7 +576,8 @@ class DiabetitcRetinopathyClassifier:
                     # Comparison
                     self.compare_results()
                 else:
-                    print("No models loaded. Exiting.")
+                    if not self.batch_mode:
+                        print("No models loaded. Exiting.")
             else:
                 # Model selection
                 selected_models = self.select_models()
@@ -471,25 +590,37 @@ class DiabetitcRetinopathyClassifier:
                 # Comparison
                 self.compare_results()
 
-            print("\n" + "=" * 70)
-            print("Pipeline completed successfully!")
-            print(f"Results saved in: {self.config.base_dir / 'results'}")
-            print(f"Models saved in: {self.config.base_dir / 'models'}")
+            if not self.batch_mode:
+                print("\n" + "=" * 70)
+                print("Pipeline completed successfully!")
+                print(f"Results saved in: {self.config.base_dir / 'results'}")
+                print(f"Models saved in: {self.config.base_dir / 'models'}")
+            
+            # Return results for programmatic access
+            return self.results
+            
         except Exception as e:
-            print(f"\nError occurred during pipeline execution: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            if not self.batch_mode:
+                print(f"\nError occurred during pipeline execution: {str(e)}")
+                import traceback
+                traceback.print_exc()
+            raise
         finally:
             # Stop monitor even if error occurs
-            print("\n" + "=" * 100)
-            print("Stopping resource monitor")
-            self.resource_monitor.stop()
+            if self.resource_monitor:
+                if not self.batch_mode:
+                    print("\n" + "=" * 100)
+                    print("Stopping resource monitor")
+                self.resource_monitor.stop()
+
 
 def main():
     #Main function to run the classification pipeline
+    args = parse_args()
     initialize_torch_settings()
-    classifier = DiabetitcRetinopathyClassifier()
-    classifier.run_full_pipeline()
+    classifier = DiabetitcRetinopathyClassifier(args)
+    return classifier.run_full_pipeline()
+
 
 if __name__ == '__main__':
     main()

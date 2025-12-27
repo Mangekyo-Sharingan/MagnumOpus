@@ -83,16 +83,18 @@ class HyperparameterTuner:
             train_subset,
             batch_size=batch_size,
             shuffle=True,
-            num_workers=0,  # Avoid multiprocessing issues during tuning
-            pin_memory=True if torch.cuda.is_available() else False
+            num_workers=self.config.num_workers,  # Avoid multiprocessing issues during tuning
+            pin_memory=True if torch.cuda.is_available() else False,
+            prefetch_factor=self.config.prefetch_factor if self.config.num_workers > 0 else None
         )
 
         val_loader = DataLoader(
             val_subset,
             batch_size=batch_size,
             shuffle=False,
-            num_workers=0,
-            pin_memory=True if torch.cuda.is_available() else False
+            num_workers=self.config.num_workers,
+            pin_memory=True if torch.cuda.is_available() else False,
+            prefetch_factor = self.config.prefetch_factor if self.config.num_workers > 0 else None
         )
 
         return train_loader, val_loader

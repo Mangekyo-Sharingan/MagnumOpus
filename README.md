@@ -92,10 +92,16 @@ MagnumOpus/
 ### Prerequisites
 
 ```bash
+pip install -r requirements.txt
+```
+
+Or install individually:
+```bash
 pip install torch torchvision
 pip install pandas numpy scikit-learn
 pip install matplotlib seaborn
 pip install pillow
+pip install ray[train,tune]  # For distributed execution
 ```
 
 ### Running the Complete Pipeline
@@ -152,6 +158,94 @@ model.eval()
 ```
 
 See [USAGE_GUIDE.md](USAGE_GUIDE.md) for complete examples.
+
+---
+
+## Batch Mode & Distributed Execution
+
+The project supports non-interactive batch execution for use with Ray clusters, remote job submission, and CI/CD pipelines.
+
+### Command Line Interface
+
+```bash
+cd Program
+python main.py --help
+```
+
+**Available arguments:**
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--models` | Models to train (vgg16, resnet50, inceptionv3, or all) | all |
+| `--epochs` | Number of training epochs | 50 |
+| `--batch-size` | Training batch size | 32 |
+| `--learning-rate` | Learning rate | 0.0001 |
+| `--num-workers` | DataLoader workers | 4 |
+| `--batch-mode` | Force batch mode (non-interactive) | False |
+| `--data-dir` | Data directory path | ../Data |
+| `--output-dir` | Model output directory | ../models |
+| `--mode` | Execution mode: train, tune, evaluate | train |
+
+### Examples
+
+**Train all models (interactive):**
+```bash
+python main.py
+```
+
+**Train specific models in batch mode:**
+```bash
+python main.py --models vgg16 resnet50 --epochs 100 --batch-mode
+```
+
+**Hyperparameter tuning:**
+```bash
+python main.py --mode tune --models inceptionv3 --batch-mode
+```
+
+### Environment Variable Configuration
+
+All training parameters can be configured via environment variables for Ray job submission:
+
+| Environment Variable | Description |
+|---------------------|-------------|
+| `RAY_EPOCHS` | Number of training epochs |
+| `RAY_BATCH_SIZE` | Training batch size |
+| `RAY_LEARNING_RATE` | Learning rate |
+| `RAY_NUM_WORKERS` | DataLoader worker count |
+| `RAY_MODELS` | Comma-separated list of models |
+| `RAY_DATA_DIR` | Data directory path |
+| `RAY_OUTPUT_DIR` | Output directory path |
+
+**Example Ray job submission:**
+```bash
+RAY_EPOCHS=100 RAY_BATCH_SIZE=64 RAY_MODELS=vgg16,resnet50 python main.py --batch-mode
+```
+
+### Ray Cluster Execution
+
+The code automatically detects when running inside a Ray worker and enables batch mode:
+
+```python
+import ray
+
+@ray.remote
+def train_model():
+    # main.py will auto-detect Ray environment
+    import subprocess
+    subprocess.run(["python", "main.py", "--models", "vgg16", "--batch-mode"])
+```
+
+### Batch Mode Behavior
+
+When running in batch mode:
+- **No interactive prompts** - All selections made via CLI/env vars
+- **Reduced console output** - Only essential progress updates
+- **No live plotting** - Training plots saved to disk only
+- **Auto-selection** - Uses specified models without confirmation
+- **Optimized DataLoader** - Prefetching and persistent workers enabled
+
+---
 
 
 ## Testing the Project

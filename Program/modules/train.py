@@ -273,6 +273,9 @@ class Trainer:
         self.resource_monitor = resource_monitor  # Resource monitor for live stats
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.model.to(self.device)
+        
+        # Detect batch mode for reduced output
+        self.batch_mode = getattr(config, 'batch_mode', False)
 
         # Get model-specific learning rate
         if model_name and hasattr(config, 'get_model_config'):
@@ -288,10 +291,11 @@ class Trainer:
 
         # Mixed Precision Training - GradScaler for FP16 (use torch.amp API)
         self.scaler = GradScaler('cuda') if (config.use_amp and self.device.type == 'cuda') else None
-        if config.use_amp and self.device.type == 'cuda':
-            print("[OK] Mixed Precision Training (FP16) enabled with GradScaler (torch.amp)")
-        elif config.use_amp:
-            print("[INFO]  AMP requested but CUDA not available; proceeding without AMP.")
+        if not self.batch_mode:
+            if config.use_amp and self.device.type == 'cuda':
+                print("[OK] Mixed Precision Training (FP16) enabled with GradScaler (torch.amp)")
+            elif config.use_amp:
+                print("[INFO]  AMP requested but CUDA not available; proceeding without AMP.")
 
         # Training history
         self.training_history = {
@@ -345,9 +349,9 @@ class Trainer:
             'inceptionv3': 'Mixed_7c',
         }
 
-        # Live plotting with Bokeh
+        # Live plotting with Bokeh - disable in batch mode for reduced I/O
         self.live_plotter = None
-        self.use_live_plotting = True  # Enable by default
+        self.use_live_plotting = not self.batch_mode
 
     def _get_memory_usage(self):
         """Get current memory usage (GPU if available, else RAM)"""
@@ -373,7 +377,8 @@ class Trainer:
             model_name = self.model_name
 
         if not model_name or model_name not in self.config.unfreeze_layers:
-            print(f"[WARNING]  Warning: Model '{model_name}' not found in unfreeze configuration. Unfreezing all layers.")
+            if not self.batch_mode:
+                print(f"[WARNING]  Warning: Model '{model_name}' not found in unfreeze configuration. Unfreezing all layers.")
             # Fallback: unfreeze everything
             for param in self.model.parameters():
                 param.requires_grad = True
@@ -1137,7 +1142,8 @@ class Trainer:
         """Save training history to file"""
         import numpy as np
         np.save(filepath, self.training_history)
-        print(f"Training history saved to: {filepath}")
+        if not self.batch_mode:
+            print(f"Training history saved to: {filepath}")
 
     def plot_training_metrics(self, save_path=None):
         """Alias for plot_training_history for compatibility with main.py"""
@@ -1167,7 +1173,8 @@ class Trainer:
 
         if save_path:
             plt.savefig(save_path)
-            print(f"Training history plot saved to: {save_path}")
+            if not self.batch_mode:
+                print(f"Training history plot saved to: {save_path}")
 
         plt.show()
 
@@ -1184,7 +1191,8 @@ class Trainer:
             'config': self.config
         }
         torch.save(checkpoint, filepath)
-        print(f"Checkpoint saved to: {filepath}")
+        if not self.batch_mode:
+            print(f"Checkpoint saved to: {filepath}")
 
     def save_complete_model(self, save_dir, model_name=None):
         """
@@ -1207,9 +1215,10 @@ class Trainer:
         model_dir = save_dir / f"{model_name}_{timestamp}"
         model_dir.mkdir(parents=True, exist_ok=True)
 
-        print(f"\n{'='*80}")
-        print(f" SAVING COMPLETE MODEL PACKAGE: {model_name}")
-        print(f"{'='*80}")
+        if not self.batch_mode:
+            print(f"\n{'='*80}")
+            print(f" SAVING COMPLETE MODEL PACKAGE: {model_name}")
+            print(f"{'='*80}")
 
         # 1. Save model state (weights + architecture)
         model_weights_path = model_dir / f"{model_name}_model.pth"
@@ -1220,12 +1229,14 @@ class Trainer:
             'num_classes': self.config.num_classes,
             'input_size': getattr(self.config, 'input_size', (224, 224)),
         }, model_weights_path)
-        print(f"[OK] Model weights saved: {model_weights_path.name}")
+        if not self.batch_mode:
+            print(f"[OK] Model weights saved: {model_weights_path.name}")
 
         # 2. Save training history
         history_path = model_dir / f"{model_name}_training_history.npy"
         np.save(history_path, self.training_history)
-        print(f"[OK] Training history saved: {history_path.name}")
+        if not self.batch_mode:
+            print(f"[OK] Training history saved: {history_path.name}")
 
         # 3. Save optimizer state (for potential resume)
         if self.optimizer:
@@ -1234,7 +1245,8 @@ class Trainer:
                 'optimizer_state_dict': self.optimizer.state_dict(),
                 'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
             }, optimizer_path)
-            print(f"[OK] Optimizer state saved: {optimizer_path.name}")
+            if not self.batch_mode:
+                print(f"[OK] Optimizer state saved: {optimizer_path.name}")
 
         # 4. Save configuration and metadata
         metadata = {
@@ -1259,12 +1271,14 @@ class Trainer:
         metadata_path = model_dir / f"{model_name}_metadata.json"
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=4)
-        print(f"[OK] Metadata saved: {metadata_path.name}")
+        if not self.batch_mode:
+            print(f"[OK] Metadata saved: {metadata_path.name}")
 
-        # 5. Save training plots
-        plot_path = model_dir / f"{model_name}_training_plots.png"
-        self.plot_training_history(save_path=plot_path)
-        print(f"[OK] Training plots saved: {plot_path.name}")
+        # 5. Save training plots (skip in batch mode)
+        if not self.batch_mode:
+            plot_path = model_dir / f"{model_name}_training_plots.png"
+            self.plot_training_history(save_path=plot_path)
+            print(f"[OK] Training plots saved: {plot_path.name}")
 
         # 6. Create README with instructions
         readme_content = f"""# {model_name} - Trained Model Package
@@ -1323,11 +1337,12 @@ with torch.no_grad():
         readme_path = model_dir / "README.md"
         with open(readme_path, 'w') as f:
             f.write(readme_content)
-        print(f"[OK] README created: {readme_path.name}")
+        if not self.batch_mode:
+            print(f"[OK] README created: {readme_path.name}")
 
-        print(f"\n{'='*80}")
-        print(f"[OK] Complete model package saved to: {model_dir}")
-        print(f"{'='*80}\n")
+            print(f"\n{'='*80}")
+            print(f"[OK] Complete model package saved to: {model_dir}")
+            print(f"{'='*80}\n")
 
         return model_dir
 
@@ -1346,9 +1361,9 @@ with torch.no_grad():
         if checkpoint['scheduler_state_dict'] and self.scheduler:
             self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
 
-        print(f"Checkpoint loaded from: {filepath}")
+        if not self.batch_mode:
+            print(f"Checkpoint loaded from: {filepath}")
         return checkpoint['epoch']
-
 # Test function for independent execution
 def test_train_module():
     """Test the training module independently"""

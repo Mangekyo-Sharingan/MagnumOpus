@@ -21,7 +21,42 @@ class Config:
             return default
         return value.strip().lower() in {"1", "true", "yes", "on"}
 
+
+    @staticmethod
+    def _get_env_int(var_name, default):
+        """Get integer from environment variable."""
+        value = os.getenv(var_name)
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except ValueError:
+            return default
+
+    @staticmethod
+    def _get_env_float(var_name, default):
+        """Get float from environment variable."""
+        value = os.getenv(var_name)
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except ValueError:
+            return default
+
+    @staticmethod
+    def _get_env_list(var_name, default):
+        """Get list from comma-separated environment variable."""
+        value = os.getenv(var_name)
+        if value is None:
+            return default
+        return [x.strip() for x in value.split(",") if x.strip()]
+
     def __init__(self, use_logger=True):
+        # Batch mode configuration
+        self.batch_mode = self._env_flag("BATCH_MODE", False)
+
+        # Logger configuration
         self.use_logger = use_logger
         self.logger = None
 
@@ -30,9 +65,9 @@ class Config:
             self.logger.__enter__()
             self.logger.log("Initializing Config module...")
 
-        # Project paths
-        self.base_dir = Path(__file__).parent.parent.parent
-        self.data_dir = self.base_dir / "Data"
+        # Project paths - allow override via environment
+        self.base_dir = Path(os.environ.get("PROJECT_BASE_DIR", Path(__file__).parent.parent.parent))
+        self.data_dir = Path(os.environ.get("DATA_DIR", self.base_dir / "Data"))
 
         # APTOS dataset paths
         self.aptos_dir = self.data_dir / "Aptos"
@@ -44,14 +79,14 @@ class Config:
         self.eyepacs_train_images_dir = self.eyepacs_dir / "train"
         self.eyepacs_train_csv = self.eyepacs_dir / "trainLabels.csv" / "trainLabels.csv"  # Fixed: CSV is inside a directory
 
-        # Training parameters
-        self.validation_split = 0.15  # 15% for validation
-        self.test_split = 0.15        # 15% for test (split from training data)
-        self.random_state = 20020315
+        # Training parameters - allow override via environment for Ray jobs
+        self.validation_split = self._get_env_float("VALIDATION_SPLIT", 0.15)
+        self.test_split = self._get_env_float("TEST_SPLIT", 0.15)
+        self.random_state = self._get_env_int("RANDOM_STATE", 20020315)
 
-        # Model Input Resolutions
-        self.resnet_target_size = 256  # Increased from 224
-        self.inception_target_size = 320 # Keep as is, or increase if needed
+        # Model Input Resolutions (V2 Enhanced)
+        self.resnet_target_size = self._get_env_int("RESNET_TARGET_SIZE", 256)  # V2: increased from 224
+        self.inception_target_size = self._get_env_int("INCEPTION_TARGET_SIZE", 299)  # V2: native resolution
         self.num_classes = 5
         self.class_names = {
             0: "No DR",
@@ -62,37 +97,45 @@ class Config:
         }
 
         # Mixed Precision Training (FP16) for better GPU utilization
-        self.use_amp = False
+        self.use_amp = self._env_flag("USE_AMP", False)
 
-        # Model-specific parameters including hyperparameters
+        # Model-specific parameters including hyperparameters (with env overrides)
+        default_batch_size = self._get_env_int("BATCH_SIZE", 64)
+        default_epochs = self._get_env_int("NUM_EPOCHS", 50)
+        default_lr = self._get_env_float("LEARNING_RATE", 0.001)
+        
+        # Enhanced V2 image sizes: ResNet50 uses 256x256, InceptionV3 uses 299x299
         self.model_configs = {
             'vgg16': {
-                'image_size': (224, 224),
+                'image_size': (224, 224),  # VGG16 native resolution
                 'pipeline': 'A',
-                'batch_size': 96, #CHANGED DUE TO MEMORY PROBLEMS
-                'epochs': 50,
-                'learning_rate': 0.001
+                'batch_size': self._get_env_int("VGG16_BATCH_SIZE", default_batch_size),
+                'epochs': self._get_env_int("VGG16_EPOCHS", default_epochs),
+                'learning_rate': self._get_env_float("VGG16_LR", default_lr)
             },
             'resnet50': {
-                'image_size': (224, 224),
+                'image_size': (256, 256),  # V2 Enhanced: increased from 224x224 for better lesion detection
                 'pipeline': 'A',
-                'batch_size': 64,
-                'epochs': 50,
-                'learning_rate': 0.001
+                'batch_size': self._get_env_int("RESNET50_BATCH_SIZE", default_batch_size),
+                'epochs': self._get_env_int("RESNET50_EPOCHS", default_epochs),
+                'learning_rate': self._get_env_float("RESNET50_LR", default_lr)
             },
             'inceptionv3': {
-                'image_size': (299, 299),
+                'image_size': (299, 299),  # V2 Enhanced: native InceptionV3 resolution
                 'pipeline': 'B',
-                'batch_size': 64,
-                'epochs': 50,
-                'learning_rate': 0.001
+                'batch_size': self._get_env_int("INCEPTIONV3_BATCH_SIZE", default_batch_size),
+                'epochs': self._get_env_int("INCEPTIONV3_EPOCHS", default_epochs),
+                'learning_rate': self._get_env_float("INCEPTIONV3_LR", default_lr)
             }
         }
 
+        # Available models - can be overridden via environment
+        self.models = self._get_env_list("MODELS", ['vgg16', 'resnet50', 'inceptionv3'])
 
-        # Available models
-        self.models = ['vgg16', 'resnet50', 'inceptionv3']
-
+        # Data loading settings
+        self.num_workers = self._get_env_int("NUM_DATA_WORKERS", 14)
+        self.prefetch_factor = self._get_env_int("PREFETCH_FACTOR", 2)
+        
         # MIOpen fix toggles
         self.enable_miopen_fix = self._env_flag("ENABLE_MIOPEN_FIX", True)
         self.miopen_fix_sources = {

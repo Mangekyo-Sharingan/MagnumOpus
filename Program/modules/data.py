@@ -547,16 +547,31 @@ class CustomDataLoader:
         val_dataset = DiabetitcRetinopathyDataset(val_df, transform=val_transform)
         test_dataset = DiabetitcRetinopathyDataset(test_df, transform=val_transform)
 
-        # Use num_workers=0 for Windows to avoid multiprocessing issues
-        num_workers = 7 if sys.platform != "win32" else 0
+        # Optimize num_workers for environment
+        if sys.platform == "win32":
+            num_workers = 0
+        else:
+            num_workers = getattr(self.config, 'num_workers', 4)
+        
         pin_memory = torch.cuda.is_available()
+        prefetch_factor = getattr(self.config, 'prefetch_factor', 2) if num_workers > 0 else None
+        persistent_workers = num_workers > 0
 
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory)
-        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
+        loader_kwargs = {
+            'batch_size': batch_size,
+            'num_workers': num_workers,
+            'pin_memory': pin_memory,
+        }
+        if num_workers > 0:
+            loader_kwargs['prefetch_factor'] = prefetch_factor
+            loader_kwargs['persistent_workers'] = persistent_workers
+
+        train_loader = DataLoader(train_dataset, shuffle=True, **loader_kwargs)
+        val_loader = DataLoader(val_dataset, shuffle=False, **loader_kwargs)
+        test_loader = DataLoader(test_dataset, shuffle=False, **loader_kwargs)
 
         if not quiet:
-            logger.info("Data loaders for train, validation, and test sets created successfully!")
+            logger.info(f"Data loaders created: num_workers={num_workers}, pin_memory={pin_memory}")
 
         # The main training function expects train_loader and val_loader.
         # The test_loader can be retrieved separately if needed, or handled within the evaluation phase.
